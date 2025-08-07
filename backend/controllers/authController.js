@@ -134,6 +134,7 @@ class AuthController {
       });
 
     } catch (error) {
+      console.error('Registration error:', error);
       res.status(CONSTANTS.HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
         success: false,
         message: CONSTANTS.RESPONSE_MESSAGES.ERROR.INTERNAL_ERROR,

@@ -42,6 +42,7 @@ class DonorController {
       });
 
     } catch (error) {
+      console.error('Error fetching donors:', error);
       res.status(CONSTANTS.HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
         success: false,
         message: CONSTANTS.RESPONSE_MESSAGES.ERROR.INTERNAL_ERROR,
