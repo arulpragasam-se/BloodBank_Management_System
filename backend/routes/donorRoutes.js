@@ -25,6 +25,33 @@ router.get('/:id',
   errorHandler.asyncHandler(donorController.getDonorById)
 );
 
+// Create donor (Admin only - doesn't handle authentication)
+router.post('/',
+  authMiddleware.requireAuth,
+  roleAuth.requireRole(['admin', 'hospital_staff']),
+  validation.sanitizeInput,
+  validation.validateRequest({
+    body: {
+      // User data
+      name: { type: 'string', required: true, minLength: 2, maxLength: 50 },
+      email: { type: 'email', required: true },
+      phone: { type: 'phone', required: true },
+      password: { type: 'password', required: true },
+      role: { type: 'enum', required: false, values: ['donor'], default: 'donor' },
+      
+      // Donor specific data
+      bloodType: { type: 'bloodType', required: true },
+      dateOfBirth: { type: 'string', required: true },
+      weight: { type: 'number', required: true, min: 30, max: 300 },
+      height: { type: 'number', required: true, min: 100, max: 250 },
+      address: { type: 'object', required: false },
+      emergencyContact: { type: 'object', required: false },
+      medicalHistory: { type: 'object', required: false }
+    }
+  }),
+  errorHandler.asyncHandler(donorController.createDonor)
+);
+
 // Update donor information
 router.put('/:id',
   authMiddleware.requireAuth,

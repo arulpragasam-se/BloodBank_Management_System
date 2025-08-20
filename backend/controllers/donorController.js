@@ -8,6 +8,111 @@ const smsService = require('../utils/smsService');
 const CONSTANTS = require('../utils/constants');
 
 class DonorController {
+// Add this method to your donorController.js file
+
+async createDonor(req, res) {
+  try {
+    const { 
+      name, email, phone, password, 
+      bloodType, dateOfBirth, weight, height, 
+      address, emergencyContact, medicalHistory 
+    } = req.body;
+
+    // Check if user already exists
+    const existingUser = await User.findOne({
+      $or: [
+        { email: email.toLowerCase() },
+        { phone: phone }
+      ]
+    });
+
+    if (existingUser) {
+      return res.status(CONSTANTS.HTTP_STATUS.CONFLICT).json({
+        success: false,
+        message: 'User with this email or phone already exists'
+      });
+    }
+
+    // Validate donor-specific data
+    const donorValidation = Validators.validateMultiple([
+      Validators.validateString(name, 'Name', 2, 50),
+      Validators.validateEmail(email),
+      Validators.validatePhone(phone),
+      Validators.validatePassword(password),
+      Validators.validateBloodType(bloodType),
+      Validators.validateDateOfBirth(dateOfBirth),
+      Validators.validateWeight(weight),
+      Validators.validateHeight(height)
+    ]);
+
+    if (!donorValidation.isValid) {
+      return res.status(CONSTANTS.HTTP_STATUS.BAD_REQUEST).json({
+        success: false,
+        message: 'Validation failed',
+        errors: donorValidation.errors
+      });
+    }
+
+    // Create user
+    const user = new User({
+      name: Helpers.sanitizeInput(name),
+      email: email.toLowerCase(),
+      phone: Helpers.formatPhone(phone),
+      password: password,
+      role: CONSTANTS.USER_ROLES.DONOR,
+      isActive: true
+    });
+
+    await user.save();
+
+    // Create donor profile
+    const donor = new Donor({
+      userId: user._id,
+      bloodType,
+      dateOfBirth: new Date(dateOfBirth),
+      weight: parseFloat(weight),
+      height: parseFloat(height),
+      address: address || {},
+      emergencyContact: emergencyContact || {},
+      medicalHistory: medicalHistory || {}
+    });
+
+    await donor.save();
+
+    // Send welcome email (optional)
+    try {
+      await emailService.sendWelcomeEmail(user.email, user.name, user.role);
+    } catch (emailError) {
+      console.log('Welcome email failed:', emailError.message);
+    }
+
+    // Return user data without tokens (admin doesn't get logged in as the donor)
+    const userResponse = {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      isActive: user.isActive,
+      createdAt: user.createdAt
+    };
+
+    res.status(CONSTANTS.HTTP_STATUS.CREATED).json({
+      success: true,
+      message: 'Donor created successfully',
+      data: { user: userResponse }
+    });
+
+  } catch (error) {
+    console.error('Create donor error:', error);
+    res.status(CONSTANTS.HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+      success: false,
+      message: CONSTANTS.RESPONSE_MESSAGES.ERROR.INTERNAL_ERROR,
+      error: error.message
+    });
+  }
+}
+
   async getAllDonors(req, res) {
     try {
       const { page = 1, limit = 10, bloodType, search, isEligible } = req.query;
@@ -98,77 +203,100 @@ class DonorController {
     }
   }
 
-  async updateDonor(req, res) {
-    try {
-      const { id } = req.params;
-      const updateData = req.body;
+async updateDonor(req, res) {
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
 
-      const validation = Validators.validateObjectId(id, 'Donor ID');
-      if (!validation.isValid) {
-        return res.status(CONSTANTS.HTTP_STATUS.BAD_REQUEST).json({
-          success: false,
-          message: validation.message
-        });
-      }
-
-      const donor = await Donor.findById(id);
-      if (!donor) {
-        return res.status(CONSTANTS.HTTP_STATUS.NOT_FOUND).json({
-          success: false,
-          message: CONSTANTS.RESPONSE_MESSAGES.ERROR.NOT_FOUND
-        });
-      }
-
-      if (updateData.bloodType) {
-        const bloodTypeValidation = Validators.validateBloodType(updateData.bloodType);
-        if (!bloodTypeValidation.isValid) {
-          return res.status(CONSTANTS.HTTP_STATUS.BAD_REQUEST).json({
-            success: false,
-            message: bloodTypeValidation.message
-          });
-        }
-      }
-
-      if (updateData.weight) {
-        const weightValidation = Validators.validateWeight(updateData.weight);
-        if (!weightValidation.isValid) {
-          return res.status(CONSTANTS.HTTP_STATUS.BAD_REQUEST).json({
-            success: false,
-            message: weightValidation.message
-          });
-        }
-      }
-
-      if (updateData.height) {
-        const heightValidation = Validators.validateHeight(updateData.height);
-        if (!heightValidation.isValid) {
-          return res.status(CONSTANTS.HTTP_STATUS.BAD_REQUEST).json({
-            success: false,
-            message: heightValidation.message
-          });
-        }
-      }
-
-      const updatedDonor = await Donor.findByIdAndUpdate(
-        id,
-        { $set: updateData },
-        { new: true, runValidators: true }
-      ).populate('userId', 'name email phone');
-
-      res.status(CONSTANTS.HTTP_STATUS.OK).json({
-        success: true,
-        message: CONSTANTS.RESPONSE_MESSAGES.SUCCESS.UPDATED,
-        data: { donor: updatedDonor }
-      });
-
-    } catch (error) {
-      res.status(CONSTANTS.HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+    const validation = Validators.validateObjectId(id, 'Donor ID');
+    if (!validation.isValid) {
+      return res.status(CONSTANTS.HTTP_STATUS.BAD_REQUEST).json({
         success: false,
-        message: CONSTANTS.RESPONSE_MESSAGES.ERROR.INTERNAL_ERROR,
-        error: error.message
+        message: validation.message
       });
     }
+
+    const donor = await Donor.findById(id).populate('userId');
+    if (!donor) {
+      return res.status(CONSTANTS.HTTP_STATUS.NOT_FOUND).json({
+        success: false,
+        message: CONSTANTS.RESPONSE_MESSAGES.ERROR.NOT_FOUND
+      });
+    }
+
+    // Validate donor-specific fields
+    if (updateData.bloodType) {
+      const bloodTypeValidation = Validators.validateBloodType(updateData.bloodType);
+      if (!bloodTypeValidation.isValid) {
+        return res.status(CONSTANTS.HTTP_STATUS.BAD_REQUEST).json({
+          success: false,
+          message: bloodTypeValidation.message
+        });
+      }
+    }
+
+    if (updateData.weight) {
+      const weightValidation = Validators.validateWeight(updateData.weight);
+      if (!weightValidation.isValid) {
+        return res.status(CONSTANTS.HTTP_STATUS.BAD_REQUEST).json({
+          success: false,
+          message: weightValidation.message
+        });
+      }
+    }
+
+    if (updateData.height) {
+      const heightValidation = Validators.validateHeight(updateData.height);
+      if (!heightValidation.isValid) {
+        return res.status(CONSTANTS.HTTP_STATUS.BAD_REQUEST).json({
+          success: false,
+          message: heightValidation.message
+        });
+      }
+    }
+
+    console.log('Updating donor with data:', updateData);
+
+    // Separate user data from donor data
+    const { name, phone, ...donorOnlyData } = updateData;
+
+    // Update user information if provided
+    if (name || phone) {
+      const userUpdateData = {};
+      if (name) userUpdateData.name = name;
+      if (phone) userUpdateData.phone = phone;
+
+      await User.findByIdAndUpdate(
+        donor.userId._id,
+        { $set: userUpdateData },
+        { new: true, runValidators: true }
+      );
+    }
+
+    // Update donor information
+    const updatedDonor = await Donor.findByIdAndUpdate(
+      id,
+      { $set: donorOnlyData },
+      { new: true, runValidators: true }
+    ).populate('userId', 'name email phone');
+
+    console.log('Updated donor:', updatedDonor);
+
+    res.status(CONSTANTS.HTTP_STATUS.OK).json({
+      success: true,
+      message: CONSTANTS.RESPONSE_MESSAGES.SUCCESS.UPDATED,
+      data: { donor: updatedDonor }
+    });
+
+  } catch (error) {
+    console.error('Update donor error:', error);
+    res.status(CONSTANTS.HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+      success: false,
+      message: CONSTANTS.RESPONSE_MESSAGES.ERROR.INTERNAL_ERROR,
+      error: error.message
+    });
   }
+}
 
   async checkEligibility(req, res) {
     try {
