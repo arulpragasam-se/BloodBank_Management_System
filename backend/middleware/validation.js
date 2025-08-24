@@ -342,9 +342,7 @@ validatePagination(req, res, next) {
 
       const validations = [
         Validators.validateBloodType(bloodType),
-        Validators.validateUnits(unitsRequired),
-        Validators.validateUrgencyLevel(urgencyLevel),
-        Validators.validateFutureDate(requiredBy, 'Required by date')
+        Validators.validateUrgencyLevel(urgencyLevel)
       ];
 
       const validation = Validators.validateMultiple(validations);

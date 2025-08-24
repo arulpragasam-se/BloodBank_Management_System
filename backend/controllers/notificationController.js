@@ -7,6 +7,7 @@ const emailService = require('../utils/emailService');
 const CONSTANTS = require('../utils/constants');
 
 class NotificationController {
+
   async getUserNotifications(req, res) {
     try {
       const { page = 1, limit = 10, type, read, priority } = req.query;
@@ -16,6 +17,7 @@ class NotificationController {
       let query = { recipient: userId };
       
       if (type) query.type = type;
+      console.log('Read status:', read);
       if (read !== undefined) query['channels.inApp.read'] = read === 'true';
       if (priority) query.priority = priority;
 
@@ -47,6 +49,7 @@ class NotificationController {
       });
 
     } catch (error) {
+      console.error('Error fetching user notifications:', error);
       res.status(CONSTANTS.HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
         success: false,
         message: CONSTANTS.RESPONSE_MESSAGES.ERROR.INTERNAL_ERROR,
@@ -55,91 +58,193 @@ class NotificationController {
     }
   }
 
-  async createNotification(req, res) {
-    try {
-      const {
-        recipient,
-        type,
-        title,
-        message,
-        data,
-        priority = 'medium',
-        scheduledFor
-      } = req.body;
+  async getAllNotifications(req, res) {
+  try {
+    const { page = 1, limit = 10, type, read, priority, recipient } = req.query;
+    const { page: pageNum, limit: limitNum, skip } = Helpers.paginate(page, limit);
 
-      const validation = Validators.validateMultiple([
-        Validators.validateObjectId(recipient, 'Recipient ID'),
-        Validators.validateString(title, 'Title', 5, 100),
-        Validators.validateString(message, 'Message', 10, 500)
-      ]);
+    let query = {};
+    
+    if (type) query.type = type;
+    if (read !== undefined) query['channels.inApp.read'] = read === 'true';
+    if (priority) query.priority = priority;
+    if (recipient) query.recipient = recipient;
 
-      if (!validation.isValid) {
-        return res.status(CONSTANTS.HTTP_STATUS.BAD_REQUEST).json({
-          success: false,
-          message: 'Validation failed',
-          errors: validation.errors
-        });
+    const notifications = await Notification.find(query)
+      .populate('recipient', 'name email phone role')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum);
+
+    const total = await Notification.countDocuments(query);
+
+    res.status(CONSTANTS.HTTP_STATUS.OK).json({
+      success: true,
+      message: CONSTANTS.RESPONSE_MESSAGES.SUCCESS.RETRIEVED,
+      data: {
+        notifications,
+        pagination: {
+          current: pageNum,
+          pages: Math.ceil(total / limitNum),
+          total,
+          limit: limitNum
+        }
       }
+    });
 
-      if (!Object.values(CONSTANTS.NOTIFICATION_TYPES).includes(type)) {
-        return res.status(CONSTANTS.HTTP_STATUS.BAD_REQUEST).json({
-          success: false,
-          message: 'Invalid notification type'
-        });
-      }
+  } catch (error) {
+    res.status(CONSTANTS.HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+      success: false,
+      message: CONSTANTS.RESPONSE_MESSAGES.ERROR.INTERNAL_ERROR,
+      error: error.message
+    });
+  }
+}
 
-      if (!Object.values(CONSTANTS.NOTIFICATION_PRIORITY).includes(priority)) {
-        return res.status(CONSTANTS.HTTP_STATUS.BAD_REQUEST).json({
-          success: false,
-          message: 'Invalid priority level'
-        });
-      }
+async createNotification(req, res) {
+  try {
+    const {
+      recipient,
+      type,
+      title,
+      message,
+      channels,
+      data,
+      priority = 'medium',
+      scheduledFor
+    } = req.body;
 
-      const user = await User.findById(recipient);
-      if (!user) {
-        return res.status(CONSTANTS.HTTP_STATUS.NOT_FOUND).json({
-          success: false,
-          message: 'Recipient not found'
-        });
-      }
+    const validation = Validators.validateMultiple([
+      Validators.validateObjectId(recipient, 'Recipient ID'),
+      Validators.validateString(title, 'Title', 5, 100),
+      Validators.validateString(message, 'Message', 10, 500)
+    ]);
 
-      const notificationData = {
-        recipient,
-        type,
-        title: Helpers.sanitizeInput(title),
-        message: Helpers.sanitizeInput(message),
-        data: data || {},
-        priority,
-        scheduledFor: scheduledFor ? new Date(scheduledFor) : new Date()
-      };
-
-      const notification = new Notification(notificationData);
-      await notification.save();
-
-      // Send immediate notifications if not scheduled for future
-      if (!scheduledFor || new Date(scheduledFor) <= new Date()) {
-        await this.sendNotificationChannels(notification, user);
-      }
-
-      res.status(CONSTANTS.HTTP_STATUS.CREATED).json({
-        success: true,
-        message: CONSTANTS.RESPONSE_MESSAGES.SUCCESS.CREATED,
-        data: { notification }
-      });
-
-    } catch (error) {
-      res.status(CONSTANTS.HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+    if (!validation.isValid) {
+      return res.status(CONSTANTS.HTTP_STATUS.BAD_REQUEST).json({
         success: false,
-        message: CONSTANTS.RESPONSE_MESSAGES.ERROR.INTERNAL_ERROR,
-        error: error.message
+        message: 'Validation failed',
+        errors: validation.errors
       });
     }
-  }
 
-  async sendNotificationChannels(notification, user) {
+    if (!Object.values(CONSTANTS.NOTIFICATION_TYPES).includes(type)) {
+      return res.status(CONSTANTS.HTTP_STATUS.BAD_REQUEST).json({
+        success: false,
+        message: 'Invalid notification type'
+      });
+    }
+
+    if (!Object.values(CONSTANTS.NOTIFICATION_PRIORITY).includes(priority)) {
+      return res.status(CONSTANTS.HTTP_STATUS.BAD_REQUEST).json({
+        success: false,
+        message: 'Invalid priority level'
+      });
+    }
+
+    const user = await User.findById(recipient);
+    if (!user) {
+      return res.status(CONSTANTS.HTTP_STATUS.NOT_FOUND).json({
+        success: false,
+        message: 'Recipient not found'
+      });
+    }
+
+    const notificationData = {
+      recipient,
+      type,
+      title: Helpers.sanitizeInput(title),
+      message: Helpers.sanitizeInput(message),
+      data: data || {},
+      priority,
+      scheduledFor: scheduledFor ? new Date(scheduledFor) : new Date()
+    };
+
+    const notification = new Notification(notificationData);
+    await notification.save();
+
+    // Send immediate notifications if not scheduled for future
+    if (!scheduledFor || new Date(scheduledFor) <= new Date()) {
+      try {
+        // Default channels if not provided
+        const notificationChannels = channels || { inApp: true, sms: false, email: false };
+
+        // Send SMS if enabled and user has phone
+        if (notificationChannels.sms && user.phone) {
+          try {
+            const smsResult = await smsService.sendSMS(user.phone, notification.message, notification.type);
+            
+            notification.channels.sms.sent = smsResult.success;
+            notification.channels.sms.sentAt = new Date();
+            notification.channels.sms.phone = user.phone;
+            notification.channels.sms.messageId = smsResult.messageId;
+            notification.channels.sms.status = smsResult.success ? 'sent' : 'failed';
+          } catch (smsError) {
+            console.error('SMS sending failed:', smsError);
+            notification.channels.sms.sent = false;
+            notification.channels.sms.status = 'failed';
+            notification.channels.sms.error = smsError.message;
+          }
+        }
+
+        // Send email if enabled and user has email
+        if (notificationChannels.email && user.email) {
+          try {
+            const emailResult = await emailService.sendEmail(
+              user.email,
+              notification.title,
+              `<p>${notification.message}</p>`
+            );
+            
+            notification.channels.email.sent = emailResult.success;
+            notification.channels.email.sentAt = new Date();
+            notification.channels.email.email = user.email;
+            notification.channels.email.status = emailResult.success ? 'sent' : 'failed';
+          } catch (emailError) {
+            console.error('Email sending failed:', emailError);
+            notification.channels.email.sent = false;
+            notification.channels.email.status = 'failed';
+            notification.channels.email.error = emailError.message;
+          }
+        }
+
+        // In-app notifications are handled by default when the notification is created
+        // Just ensure the inApp channel is marked as delivered
+        if (notificationChannels.inApp !== false) {
+          notification.channels.inApp.delivered = true;
+          notification.channels.inApp.deliveredAt = new Date();
+        }
+
+        // Save the updated notification with channel status
+        await notification.save();
+
+      } catch (channelError) {
+        console.error('Error sending notification channels:', channelError);
+        // Don't fail the entire request if channel sending fails
+        // The notification is still created successfully
+      }
+    }
+
+    res.status(CONSTANTS.HTTP_STATUS.CREATED).json({
+      success: true,
+      message: CONSTANTS.RESPONSE_MESSAGES.SUCCESS.CREATED,
+      data: { notification }
+    });
+
+  } catch (error) {
+    console.error('Error in createNotification:', error);
+    res.status(CONSTANTS.HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+      success: false,
+      message: CONSTANTS.RESPONSE_MESSAGES.ERROR.INTERNAL_ERROR,
+      error: error.message
+    });
+  }
+}
+
+async sendNotificationChannels(notification, user, channels = { inApp: true, sms: false, email: false }) {
     try {
-      // Send SMS if user has phone
-      if (user.phone) {
+      // Send SMS if enabled and user has phone
+      if (channels.sms && user.phone) {
         const smsResult = await smsService.sendSMS(user.phone, notification.message, notification.type);
         
         notification.channels.sms.sent = smsResult.success;
@@ -149,8 +254,8 @@ class NotificationController {
         notification.channels.sms.status = smsResult.success ? 'sent' : 'failed';
       }
 
-      // Send email if user has email
-      if (user.email) {
+      // Send email if enabled and user has email
+      if (channels.email && user.email) {
         const emailResult = await emailService.sendEmail(
           user.email,
           notification.title,
@@ -166,6 +271,7 @@ class NotificationController {
       await notification.save();
     } catch (error) {
       console.error('Error sending notification channels:', error);
+      throw error;
     }
   }
 

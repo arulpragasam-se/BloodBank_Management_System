@@ -34,7 +34,7 @@ router.post('/',
       location: { type: 'object', required: true },
       targetBloodTypes: { type: 'array', required: false },
       targetDonors: { type: 'number', required: false, min: 0 },
-      isPublic: { type: 'string', required: false }
+      isPublic: { type: 'boolean', required: false }
     }
   }),
   validation.validateBusinessRules('campaign_scheduling'),
@@ -64,7 +64,7 @@ router.put('/:id',
       targetBloodTypes: { type: 'array', required: false },
       targetDonors: { type: 'number', required: false, min: 0 },
       status: { type: 'enum', required: false, values: ['planned', 'active', 'completed', 'cancelled'] },
-      isPublic: { type: 'string', required: false }
+      isPublic: { type: 'boolean', required: false }
     }
   }),
   validation.validateDateRange,

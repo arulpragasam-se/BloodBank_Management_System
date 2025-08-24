@@ -11,14 +11,23 @@ const router = express.Router();
 router.get('/',
   authMiddleware.requireAuth,
   validation.validatePagination,
+  errorHandler.asyncHandler(notificationController.getUserNotifications)
+);
+
+// Get all notifications (Admin/Hospital Staff only) - MISSING ROUTE
+router.get('/all',
+  authMiddleware.requireAuth,
+  roleAuth.requireHospitalStaff,
+  validation.validatePagination,
   validation.validateRequest({
     query: {
       type: { type: 'enum', required: false, values: ['appointment_reminder', 'eligibility_update', 'campaign_invitation', 'blood_request', 'low_stock_alert', 'expiry_alert', 'donation_thanks', 'test_results', 'emergency_request'] },
       read: { type: 'string', required: false },
-      priority: { type: 'enum', required: false, values: ['low', 'medium', 'high', 'urgent'] }
+      priority: { type: 'enum', required: false, values: ['low', 'medium', 'high', 'urgent'] },
+      recipient: { type: 'objectId', required: false }
     }
   }),
-  errorHandler.asyncHandler(notificationController.getUserNotifications)
+  errorHandler.asyncHandler(notificationController.getAllNotifications)
 );
 
 // Create notification

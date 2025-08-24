@@ -104,109 +104,109 @@ class BloodRequestController {
     }
   }
 
-  async createRequest(req, res) {
-    try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          success: false,
-          message: 'Validation failed',
-          errors: errors.array()
-        });
-      }
-
-      const {
-        hospitalId,
-        recipientId,
-        bloodType,
-        units,
-        urgency,
-        reason,
-        patientCondition,
-        requiredBy,
-        notes
-      } = req.body;
-
-      // Verify hospital exists
-      const hospital = await Hospital.findById(hospitalId);
-      if (!hospital) {
-        return res.status(404).json({
-          success: false,
-          message: 'Hospital not found'
-        });
-      }
-
-      // Verify recipient if provided
-      if (recipientId) {
-        const recipient = await Recipient.findById(recipientId);
-        if (!recipient) {
-          return res.status(404).json({
-            success: false,
-            message: 'Recipient not found'
-          });
-        }
-
-        // Check blood type compatibility
-        if (recipient.bloodType !== bloodType) {
-          return res.status(400).json({
-            success: false,
-            message: 'Blood type does not match recipient record'
-          });
-        }
-      }
-
-      // Check current inventory availability
-      const availableUnits = await BloodInventory.countDocuments({
-        bloodType,
-        status: 'available',
-        expiryDate: { $gt: new Date() }
-      });
-
-      const bloodRequest = new BloodRequest({
-        hospitalId,
-        recipientId,
-        bloodType,
-        units,
-        urgency,
-        reason,
-        patientCondition,
-        requiredBy: new Date(requiredBy),
-        notes,
-        requestedBy: req.user.id,
-        status: 'pending',
-        availableUnits
-      });
-
-      await bloodRequest.save();
-
-      // Populate the response
-      await bloodRequest.populate([
-        { path: 'hospitalId', select: 'name registrationNumber' },
-        { path: 'recipientId', select: 'userId bloodType' },
-        { path: 'requestedBy', select: 'name email' }
-      ]);
-
-      // Auto-approve if sufficient inventory and low urgency
-      if (availableUnits >= units && urgency === 'low') {
-        bloodRequest.status = 'approved';
-        await bloodRequest.save();
-      }
-
-      res.status(201).json({
-        success: true,
-        message: 'Blood request created successfully',
-        data: { request: bloodRequest }
-      });
-
-    } catch (error) {
-      console.error('Create request error:', error);
-      res.status(500).json({
+async createRequest(req, res) {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
         success: false,
-        message: 'Failed to create blood request',
-        error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+        message: 'Validation failed',
+        errors: errors.array()
       });
     }
+
+    const {
+      hospitalId,
+      recipientId,
+      bloodType,
+      units,
+      urgency,
+      reason,
+      patientCondition,
+      requiredBy,
+      notes
+    } = req.body;
+
+    // Verify hospital exists
+    const hospital = await Hospital.findById(hospitalId);
+    if (!hospital) {
+      return res.status(404).json({
+        success: false,
+        message: 'Hospital not found'
+      });
+    }
+
+    // Verify recipient if provided
+    if (recipientId) {
+      const recipient = await Recipient.findById(recipientId);
+      if (!recipient) {
+        return res.status(404).json({
+          success: false,
+          message: 'Recipient not found'
+        });
+      }
+
+      // Check blood type compatibility
+      if (recipient.bloodType !== bloodType) {
+        return res.status(400).json({
+          success: false,
+          message: 'Blood type does not match recipient record'
+        });
+      }
+    }
+
+    // Check current inventory availability
+    const availableUnits = await BloodInventory.countDocuments({
+      bloodType,
+      status: 'available',
+      expiryDate: { $gt: new Date() }
+    });
+
+    // Map route validation fields to database model fields
+    const bloodRequest = new BloodRequest({
+      hospitalId,
+      recipientId,
+      bloodType,
+      unitsRequired: units,        // Map units -> unitsRequired
+      urgencyLevel: urgency,       // Map urgency -> urgencyLevel
+      reason,
+      patientCondition,
+      requiredBy: new Date(requiredBy),
+      notes,
+      requestedBy: req.user.userId,    // Fix: use userId instead of id
+      status: 'pending'
+    });
+
+    await bloodRequest.save();
+
+    // Populate the response
+    await bloodRequest.populate([
+      { path: 'hospitalId', select: 'name registrationNumber' },
+      { path: 'recipientId', select: 'userId bloodType' },
+      { path: 'requestedBy', select: 'name email' }
+    ]);
+
+    // Auto-approve if sufficient inventory and low urgency
+    if (availableUnits >= units && urgency === 'low') {
+      bloodRequest.status = 'approved';
+      await bloodRequest.save();
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Blood request created successfully',
+      data: { request: bloodRequest }
+    });
+
+  } catch (error) {
+    console.error('Create request error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create blood request',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
   }
+}
 
   async getRequestStats(req, res) {
     try {
